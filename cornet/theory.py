@@ -12,14 +12,24 @@ zmin = -10.0
 zmax = 10.0
 
 def fast_integral(integrand, zmin, zmax, dz, ndim=1):
-    zs = np.r_[zmin:zmax:dz]
-    if ndim > 1:
-        zgrid = np.meshgrid(*((zs,) * ndim))
-    else:
-        zgrid = (zs,)
-    out = integrand(*zgrid)
-    return out.sum(tuple(np.arange(ndim))) * dz**ndim
+    # zs = np.arange(zmin, zmax, dz)
+    # if ndim > 1:
+    #     zgrid = np.meshgrid(*((zs,) * ndim))
+    # else:
+    #     zgrid = (zs,)
+    # out = integrand(*zgrid)
+    # return out.sum(tuple(np.arange(ndim))) * dz**
+    
+    zs = np.arange(zmin, zmax, dz)  # ndarray, samples for a single dim
+    axes = (zs,) * ndim  # tuple, containing ndim zs, e.g., ndim=2 -> axes = (zs, zs)
+    zgrid = np.meshgrid(*axes)  # tuple, containing ndim len(zs)*len(zs) matrix, e.g., ndim=2 -> zgrid = (Z1, Z2), Z1 varies across axis0, Z2 varies across axis2
+    out = integrand(*zgrid)  # ndarray, of size len(zs)*len(zs), integrand values on each position    
 
+    axes_to_sum = tuple(np.arange(ndim))  # (0, 1, ... , ndim)
+    integral_sum = out.sum(axis=axes_to_sum)
+    volume_element = dz**ndim  # volume of a cube with interval dz
+    
+    return integral_sum * volume_element
 
 def qmap(qin, weight_sigma=1.0 , bias_sigma=0.0, nonlinearity=np.tanh,
          epsabs=epsabs, epsrel=epsrel, zmin=-10, zmax=10, dz=dz, fast=True):
@@ -29,6 +39,22 @@ def qmap(qin, weight_sigma=1.0 , bias_sigma=0.0, nonlinearity=np.tanh,
         return norm.pdf(z[:, None]) * nonlinearity(np.sqrt(qin[None, :]) * z[:, None])**2
     integral = fast_integral(integrand, zmin, zmax, dz=dz)
     return weight_sigma**2 * integral + bias_sigma**2
+
+def q_fixed_point(weight_sigma, bias_sigma, nonlinearity, max_iter=500, tol=1e-9, qinit=3.0, fast=True, tol_frac=0.01):
+    """Compute fixed point of q map"""
+    q = qinit
+    qs = []
+    for i in xrange(max_iter):
+        qnew = qmap(q, weight_sigma, bias_sigma, nonlinearity, fast=fast)
+        err = np.abs(qnew - q)
+        qs.append(q)
+        if err < tol:
+            break
+        q = qnew
+    # Find first time it gets within tol_frac fracitonal error of q*
+    frac_err = (np.array(qs) - q)**2 / (1e-9 + q**2)
+    t = np.flatnonzero(frac_err < tol_frac)[0]
+    return t, q
 
 def compute_chi1(qstar, weight_sigma=1.0, bias_sigma=0.01, dphi=np.tanh):
     def integrand(z):
@@ -60,19 +86,3 @@ def covmap(q1, q2, q12, weight_sigma, bias_sigma, nonlinearity=np.tanh, zmin=-10
             nonlinearity(u2[None, None, :] * z1[..., None] + u3[None, None, :] * z2[..., None]))
     integral = fast_integral(integrand, zmin, zmax, dz, ndim=2)
     return weight_sigma**2 * integral + bias_sigma**2
-
-def q_fixed_point(weight_sigma, bias_sigma, nonlinearity, max_iter=500, tol=1e-9, qinit=3.0, fast=True, tol_frac=0.01):
-    """Compute fixed point of q map"""
-    q = qinit
-    qs = []
-    for i in xrange(max_iter):
-        qnew = qmap(q, weight_sigma, bias_sigma, nonlinearity, fast=fast)
-        err = np.abs(qnew - q)
-        qs.append(q)
-        if err < tol:
-            break
-        q = qnew
-    # Find first time it gets within tol_frac fracitonal error of q*
-    frac_err = (np.array(qs) - q)**2 / (1e-9 + q**2)
-    t = np.flatnonzero(frac_err < tol_frac)[0]
-    return t, q
